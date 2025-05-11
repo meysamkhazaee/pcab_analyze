@@ -1,31 +1,45 @@
 import pyshark
 from collections import Counter, defaultdict
 from datetime import datetime
+from pathlib import Path
 from rich.progress import track
 from statistics import mean
 import matplotlib.pyplot as plt
 import pandas as pd
+from logger import logger
 
 class capture_analyzer:
 
     def __init__(self, file_path, filter=None):
         self.file_path_ = file_path
+        self.logger_ = logger(log_level='DEBUG')
+        self.logger_.debug(f"Loading PCAP file: {file_path}")
         self.pcap_ = pyshark.FileCapture(file_path, display_filter=filter, keep_packets=False)
+
+        pcap_name = Path(file_path).stem
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.output_dir_ = Path("output") / f"{pcap_name}_{timestamp}"
+        self.output_dir_.mkdir(parents=True, exist_ok=True)
+        self.logger_.info(f"Output folder created: {self.output_dir_}")
+        
         self.sessions_ = defaultdict(set)
-        self.submits_ = {}
-        self.submits_resp_ = {}
+        self.request_ = {}
+        self.request_resp_ = {}
         self.summary_ = {}
         self.response_times_ = []
+        self.logger_.debug("PCAP file loaded successfully.")
 
     def close(self):
+        self.logger_.debug("Closing PCAP capture.")
         self.pcap_.close()
 
-    def analyze_pcab(self):
+    def analyze_pcab(self, packet_type):
+        self.logger_.debug(f"Starting PCAP analysis for packet_type = {packet_type}")
         protocol_counter = Counter()
         timestamps = []
         packet_count = 0
 
-        for pkt in track(self.pcap_, description="processing packets"):
+        for pkt in track(self.pcap_, description="Processing packets"):
             try:
                 protocol = pkt.highest_layer
                 timestamp = float(pkt.sniff_timestamp)
@@ -43,14 +57,21 @@ class capture_analyzer:
                     target_addr = f"{src_ip}:{src_port}"
                     self.sessions_[system_id].add(target_addr)
 
-                if 'submit_sm' in cmd_type and 'resp' not in cmd_type:
-                    self.submits_[seq_num] = timestamp
+                if packet_type in cmd_type and 'resp' not in cmd_type:
+                    self.request_[seq_num] = timestamp
 
-                elif 'submit_sm - resp' in cmd_type:
-                    self.submits_resp_[seq_num] = timestamp
+                elif f'{packet_type} - resp' in cmd_type:
+                    self.request_resp_[seq_num] = timestamp
 
             except AttributeError:
                 continue
+        
+        if len(self.request_) == 0:
+            self.logger_.error(f"No results found for specified packet_type = {packet_type}.")
+            exit()
+
+        self.logger_.debug(f"Packet processing complete. Total packets: {packet_count}")
+        self.logger_.debug(f"Matching requests to responses...")
 
         start_time = datetime.fromtimestamp(min(timestamps))
         end_time = datetime.fromtimestamp(max(timestamps))
@@ -58,12 +79,16 @@ class capture_analyzer:
 
         # Match requests with responses
         self.response_times_ = []
-        for seq in self.submits_:
-            if seq in self.submits_resp_:
-                delta = self.submits_resp_[seq] - self.submits_[seq]
+        for seq in self.request_:
+            if seq in self.request_resp_:
+                delta = self.request_resp_[seq] - self.request_[seq]
                 self.response_times_.append(delta)
 
-        unmatched = set(self.submits_) - set(self.submits_resp_)
+        unmatched = set(self.request_) - set(self.request_resp_)
+
+        self.logger_.debug(f"Matched {len(self.response_times_)} request/response pairs.")
+        self.logger_.debug(f"Unmatched sequences: {len(unmatched)}")
+
         min_diff = min(self.response_times_) if self.response_times_ else None
         max_diff = max(self.response_times_) if self.response_times_ else None
         mean_diff = mean(self.response_times_) if self.response_times_ else None
@@ -93,8 +118,8 @@ class capture_analyzer:
             "packets_by_protocols": dict(protocol_counter),
             "connections_count": len(self.sessions_),
             "sessions_count": {k: len(v) for k, v in self.sessions_.items()},
-            "submit_sm_count": len(self.submits_),
-            "submit_sm_resp_count": len(self.submits_resp_),
+            "submit_sm_count": len(self.request_),
+            "submit_sm_resp_count": len(self.request_resp_),
             "unmatched_submit_sequences": list(unmatched),
             "matched_count": len(self.response_times_),
             "min_response_time": min_diff,
@@ -132,13 +157,16 @@ class capture_analyzer:
             "Percent Less Than 0.090": round((count_090 / total_matched) * 100, 2),
             "Percent Greater Than 1.000": round((count_gt_1000 / total_matched) * 100, 2),
             "Percent Greater Than 1.500": round((count_gt_1500 / total_matched) * 100, 2),
-            "10 largest_differences": sorted(self.response_times_, reverse=True)[:10],
+            "10 largest_differences": ["{:.2f}".format(x) for x in sorted(self.response_times_, reverse=True)[:10]],
             "capture_duration": str(duration),
             "start_time": str(start_time),
             "end_time": str(end_time)
         }
 
+        self.logger_.debug("Summary generation completed.")
+
     def plot_raw_response_times(self):
+        self.logger_.debug("Plotting raw response times.")
         plt.figure(figsize=(14, 5))
         plt.plot(self.response_times_, color='mediumblue', linewidth=1)
         plt.title("Recorded SMPP Response Times", fontsize=14, fontweight='bold')
@@ -146,11 +174,13 @@ class capture_analyzer:
         plt.ylabel("Response Time (seconds)", fontsize=12)
         plt.grid(True, linestyle='--', alpha=0.6)
         plt.tight_layout()
-        plt.savefig("raw_response_times.png", dpi=300)
+        output_file = self.output_dir_ / "summary_report.png"
+        plt.savefig(output_file, dpi=300)
         plt.close()
+        self.logger_.debug(f"Raw response times saved to {output_file}")
 
     def plot_response_distribution_by_count(self):
-
+        self.logger_.debug("Generating response distribution by percentage.")
         stats_to_plot = {
             "Greater Than Mean": self.summary_["Percent Greater Than Mean Time Difference"],
             "Smaller Than Mean": self.summary_["Percent Smaller Than Mean Time Difference"],
@@ -176,27 +206,33 @@ class capture_analyzer:
         bars = plt.bar(df["Category"], df["Percent"], color='skyblue')
         plt.xticks(rotation=45, fontsize=10)
         plt.yticks(fontsize=10)
-        mean_value = self.summary_["avg_response_time"]
-        plt.title(f"Response Time Distribution ( Mean Response Time = {mean_value:.6f} sec)", fontsize=14, fontweight='bold')
+        mean_value = self.summary_.get("avg_response_time", None)
+
+        if mean_value is not None:
+            title = f"Response Time Distribution ( Mean Response Time = {mean_value:.6f} sec)"
+        else:
+            title = "Response Time Distribution (Mean Response Time = N/A)"
+        plt.title(title, fontsize=14, fontweight='bold')
         plt.xlabel("Time Categories", fontsize=12)
         plt.ylabel("Percent", fontsize=12)
 
         # Annotate bars
         for bar in bars:
             height = bar.get_height()
-            plt.annotate(f'{height:,}', xy=(bar.get_x() + bar.get_width() / 2, height),
-                        xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
+            plt.annotate(f'{height}%', xy=(bar.get_x() + bar.get_width() / 2, height),
+                         xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
 
         plt.tight_layout()
         plt.grid(axis='y', linestyle='--', alpha=0.7)
 
         # Save chart
-        output_file = "response_time_distribution_by_percentage.png"
+        output_file = self.output_dir_ / "response_time_distribution_by_percentage.png"
         plt.savefig(output_file, dpi=300)
         plt.close()
+        self.logger_.debug(f"Distribution plot (percentage) saved to {output_file}")
 
     def plot_response_distribution_by_percentage(self):
-
+        self.logger_.debug("Generating response distribution by count.")
         stats_to_plot = {
             "Greater Than Mean": self.summary_["Count Greater Than Mean Time Difference"],
             "Smaller Than Mean": self.summary_["Count Smaller Than Mean Time Difference"],
@@ -222,8 +258,13 @@ class capture_analyzer:
         bars = plt.bar(df["Category"], df["Count"], color='skyblue')
         plt.xticks(rotation=45, fontsize=10)
         plt.yticks(fontsize=10)
-        mean_value = self.summary_["avg_response_time"]
-        plt.title(f"Response Time Distribution ( Mean Response Time = {mean_value:.6f} sec)", fontsize=14, fontweight='bold')
+        mean_value = self.summary_.get("avg_response_time", None)
+
+        if mean_value is not None:
+            title = f"Response Time Distribution ( Mean Response Time = {mean_value:.6f} sec)"
+        else:
+            title = "Response Time Distribution (Mean Response Time = N/A)"
+        plt.title(title, fontsize=14, fontweight='bold')
         plt.xlabel("Time Categories", fontsize=12)
         plt.ylabel("Count", fontsize=12)
 
@@ -237,12 +278,13 @@ class capture_analyzer:
         plt.grid(axis='y', linestyle='--', alpha=0.7)
 
         # Save chart
-        output_file = "response_time_distribution_by_count.png"
+        output_file = self.output_dir_ / "response_time_distribution_by_count.png"
         plt.savefig(output_file, dpi=300)
         plt.close()
+        self.logger_.debug(f"Distribution plot (count) saved to {output_file}")
 
-    def generate_summary_image(self, output_file: str = "summary_report.png", title: str = "PCAP Analysis Summary"):
-
+    def generate_summary_image(self, title: str = "PCAP Analysis Summary"):
+        output_file = self.output_dir_ / "summary.png"
         lines = []
         for k, v in self.summary_.items():
             if isinstance(v, dict):
@@ -270,3 +312,4 @@ class capture_analyzer:
 
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         plt.close()
+        self.logger_.debug(f"Summary image saved to {output_file}")
