@@ -1,4 +1,5 @@
-myenv/*
 __pycache__/*
 VSGKZD_plb-1_29757_20250507112342.pcap
 output/*
+.vscode/
+myenv/*

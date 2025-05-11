@@ -22,7 +22,7 @@ class capture_analyzer:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.output_dir_ = Path("output") / f"{pcap_name}_{timestamp}"
         self.output_dir_.mkdir(parents=True, exist_ok=True)
-        self.logger_.info(f"Output folder created: {self.output_dir_}")
+        self.logger_.debug(f"Output folder created: {self.output_dir_}")
         
         self.sessions_ = defaultdict(set)
         self.request_ = {}
@@ -60,6 +60,10 @@ class capture_analyzer:
                     self.sessions_[system_id].add(target_addr)
 
                 if packet_type in cmd_type and 'resp' not in cmd_type:
+                    src_ip = pkt.ip.src
+                    src_port = pkt.tcp.srcport
+                    target_addr = f"{src_ip}:{src_port}"
+                    self.sessions_[target_addr].add(target_addr)
                     self.request_[seq_num] = timestamp
 
                 elif f'{packet_type} - resp' in cmd_type:
@@ -78,11 +82,16 @@ class capture_analyzer:
         start_time = datetime.fromtimestamp(min(timestamps))
         end_time = datetime.fromtimestamp(max(timestamps))
         duration = end_time - start_time
+        negative_response_time = []
 
         # Match requests with responses
         self.response_times_ = []
         for seq in self.request_:
             if seq in self.request_resp_:
+                if self.request_resp_[seq] < self.request_[seq]:
+                    negative_response_time.append(seq)
+                    self.logger_.error(f"Response time is negative for seq {seq} ")
+                    continue
                 delta = self.request_resp_[seq] - self.request_[seq]
                 self.response_times_.append(delta)
 
@@ -116,53 +125,55 @@ class capture_analyzer:
         count_gt_1500 = sum(d > 1.500 for d in self.response_times_)
 
         self.summary_ = {
-            "total_packets": packet_count,
-            "packets_by_protocols": dict(protocol_counter),
-            "connections_count": len(self.sessions_),
-            "sessions_count": {k: len(v) for k, v in self.sessions_.items()},
-            "submit_sm_count": len(self.request_),
-            "submit_sm_resp_count": len(self.request_resp_),
-            "unmatched_submit_sequences": list(unmatched),
-            "matched_count": len(self.response_times_),
-            "min_response_time": min_diff,
-            "max_response_time": max_diff,
-            "avg_response_time": mean_diff,
+            "Total Packets": packet_count,
+            "Protocols": dict(protocol_counter),
+            "Connections": len(self.sessions_),
+            "Sessions": {k: len(v) for k, v in self.sessions_.items()},
+            "Packet Type": packet_type,
+            f"'{packet_type}' Count": len(self.request_),
+            f"'{packet_type} - resp' Count": len(self.request_resp_),
+            f"Unmatched '{packet_type}' sequences": list(unmatched),
+            f"Negative Response '{packet_type}' sequences": list(negative_response_time),
+            "Matched Request": len(self.response_times_),
+            "Min Response Time": min_diff,
+            "Max Response Time": max_diff,
+            "Avg Response Time": mean_diff,
             "Count Greater Than Mean Time Difference": count_gt_mean,
             "Percent Greater Than Mean Time Difference": round((count_gt_mean / total_matched) * 100, 2),
             "Count Smaller Than Mean Time Difference": count_lt_mean,
             "Percent Smaller Than Mean Time Difference": round((count_lt_mean / total_matched) * 100, 2),
             "Count Less Than 0.001": count_001,
-            "Count Less Than 0.002": count_002,
-            "Count Less Than 0.003": count_003,
-            "Count Less Than 0.004": count_004,
-            "Count Less Than 0.005": count_005,
-            "Count Less Than 0.010": count_010,
-            "Count Less Than 0.020": count_020,
-            "Count Less Than 0.030": count_030,
-            "Count Less Than 0.040": count_040,
-            "Count Less Than 0.050": count_050,
-            "Count Less Than 0.070": count_070,
-            "Count Less Than 0.090": count_090,
-            "Count Greater Than 1.000": count_gt_1000,
-            "Count Greater Than 1.500": count_gt_1500,
             "Percent Less Than 0.001": round((count_001 / total_matched) * 100, 2),
+            "Count Less Than 0.002": count_002,
             "Percent Less Than 0.002": round((count_002 / total_matched) * 100, 2),
+            "Count Less Than 0.003": count_003,
             "Percent Less Than 0.003": round((count_003 / total_matched) * 100, 2),
+            "Count Less Than 0.004": count_004,
             "Percent Less Than 0.004": round((count_004 / total_matched) * 100, 2),
+            "Count Less Than 0.005": count_005,
             "Percent Less Than 0.005": round((count_005 / total_matched) * 100, 2),
+            "Count Less Than 0.010": count_010,
             "Percent Less Than 0.010": round((count_010 / total_matched) * 100, 2),
+            "Count Less Than 0.020": count_020,
             "Percent Less Than 0.020": round((count_020 / total_matched) * 100, 2),
+            "Count Less Than 0.030": count_030,
             "Percent Less Than 0.030": round((count_030 / total_matched) * 100, 2),
+            "Count Less Than 0.040": count_040,
             "Percent Less Than 0.040": round((count_040 / total_matched) * 100, 2),
+            "Count Less Than 0.050": count_050,
             "Percent Less Than 0.050": round((count_050 / total_matched) * 100, 2),
+            "Count Less Than 0.070": count_070,
             "Percent Less Than 0.070": round((count_070 / total_matched) * 100, 2),
+            "Count Less Than 0.090": count_090,
             "Percent Less Than 0.090": round((count_090 / total_matched) * 100, 2),
+            "Count Greater Than 1.000": count_gt_1000,
             "Percent Greater Than 1.000": round((count_gt_1000 / total_matched) * 100, 2),
+            "Count Greater Than 1.500": count_gt_1500,
             "Percent Greater Than 1.500": round((count_gt_1500 / total_matched) * 100, 2),
-            "10 largest_differences": ["{:.2f}".format(x) for x in sorted(self.response_times_, reverse=True)[:10]],
-            "capture_duration": str(duration),
-            "start_time": str(start_time),
-            "end_time": str(end_time)
+            "10 Largest Differences": ["{:.2f}".format(x) for x in sorted(self.response_times_, reverse=True)[:10]],
+            "Capture Duration": str(duration),
+            "Start Time": str(start_time),
+            "End time": str(end_time)
         }
 
         self.logger_.debug("Summary generation completed.")
@@ -211,9 +222,10 @@ class capture_analyzer:
         mean_value = self.summary_.get("avg_response_time", None)
 
         if mean_value is not None:
-            title = f"Response Time Distribution ( Mean Response Time = {mean_value:.6f} sec)"
+            title = f"Response Time Distribution (Mean Response Time = {mean_value:.6f} sec)"
         else:
             title = "Response Time Distribution (Mean Response Time = N/A)"
+
         plt.title(title, fontsize=14, fontweight='bold')
         plt.xlabel("Time Categories", fontsize=12)
         plt.ylabel("Percent", fontsize=12)

@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+import sys
 from capture_analyzer import capture_analyzer
 
 def main():
@@ -9,15 +10,22 @@ def main():
     parser.add_argument('--filter', type=str, help='Optional filter on PCAP file', default=None)
     args = parser.parse_args()
 
-    current_dir = Path(__file__).parent.resolve()
-    file_path = current_dir / args.pcap_file
+    if getattr(sys, 'frozen', False):
+        current_dir = Path(sys.executable).parent
+    else:
+        current_dir = Path(__file__).parent.resolve()
 
-    if not file_path.exists():
-        parser.error(f"PCAP file not found: {file_path}")
-    if not file_path.is_file() or file_path.suffix.lower() != '.pcap':
-        parser.error(f"Invalid PCAP file: {file_path}. Please provide a valid .pcap file.")
+    pcap_name = Path(args.pcap_file).stem
+    file_path = current_dir / f"{pcap_name}.pcap"
 
-    analyzer = capture_analyzer(file_path=str(file_path), filter=args.filter)
+    if file_path.exists():
+        final_pcap_path = file_path
+    elif Path(args.pcap_file).exists():
+        final_pcap_path = Path(args.pcap_file)
+    else:
+        parser.error(f"PCAP file not found in current dir or at path: {args.pcap_file}")
+
+    analyzer = capture_analyzer(file_path=str(final_pcap_path), filter=args.filter)
 
     try:
         analyzer.analyze_pcab(packet_type=args.packet_type)
