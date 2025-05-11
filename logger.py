@@ -4,7 +4,7 @@ import datetime
 from termcolor import colored
 
 class logger:
-    def __init__(self, client_id="smpp_client", log_level=logging.INFO):
+    def __init__(self, client_id="pcab_analyzer", log_level=logging.INFO):
         """
         Initializes a logger instance.
 

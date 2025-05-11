@@ -21,8 +21,7 @@ class capture_analyzer:
         pcap_name = Path(file_path).stem
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.output_dir_ = Path("output") / f"{pcap_name}_{timestamp}"
-        self.output_dir_.mkdir(parents=True, exist_ok=True)
-        self.logger_.debug(f"Output folder created: {self.output_dir_}")
+        # self.output_dir_.mkdir(parents=True, exist_ok=True)
         
         self.sessions_ = defaultdict(set)
         self.request_ = {}
@@ -44,6 +43,8 @@ class capture_analyzer:
         for pkt in track(self.pcap_, description="Processing packets"):
             try:
                 protocol = pkt.highest_layer
+                if protocol != 'SMPP':
+                    continue
                 timestamp = float(pkt.sniff_timestamp)
                 protocol_counter[protocol] += 1
                 timestamps.append(timestamp)
@@ -70,7 +71,9 @@ class capture_analyzer:
                     self.request_resp_[seq_num] = timestamp
 
             except AttributeError:
-                continue
+                self.logger_.error("PCAP analysis failed.")
+                self.pcap_.close()
+                exit()
         
         if len(self.request_) == 0:
             self.logger_.error(f"No results found for specified packet_type = {packet_type}.")
@@ -176,6 +179,8 @@ class capture_analyzer:
             "End time": str(end_time)
         }
 
+        self.output_dir_ = Path(self.output_dir_) / f"{packet_type}"
+        self.output_dir_.mkdir(parents=True, exist_ok=True)
         self.logger_.debug("Summary generation completed.")
 
     def plot_raw_response_times(self):
