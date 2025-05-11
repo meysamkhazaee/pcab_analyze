@@ -1,10 +1,6 @@
 import argparse
-import sys
 from pathlib import Path
 from capture_analyzer import capture_analyzer
-from logger import logger
-
-__version__ = "1.0.0"
 
 def main():
     parser = argparse.ArgumentParser(description="PCAP Analysis Tool")

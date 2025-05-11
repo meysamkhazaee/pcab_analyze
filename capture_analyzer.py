@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from logger import logger
 
+__version__ = "1.0.0"
+
 class capture_analyzer:
 
     def __init__(self, file_path, filter=None):
