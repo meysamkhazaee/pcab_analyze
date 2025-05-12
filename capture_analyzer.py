@@ -144,38 +144,38 @@ class capture_analyzer:
             "Max Response Time": max_diff,
             "Avg Response Time": mean_diff,
             "Count Greater Than Mean Time Difference": count_gt_mean,
-            "Percent Greater Than Mean Time Difference": round((count_gt_mean / total_matched) * 100, 2),
+            "Percent Greater Than Mean Time Difference": f'{round((count_gt_mean / total_matched) * 100, 2)}%',
             "Count Smaller Than Mean Time Difference": count_lt_mean,
-            "Percent Smaller Than Mean Time Difference": round((count_lt_mean / total_matched) * 100, 2),
+            "Percent Smaller Than Mean Time Difference": f'{round((count_lt_mean / total_matched) * 100, 2)}%',
             "Count Less Than 0.001": count_001,
-            "Percent Less Than 0.001": round((count_001 / total_matched) * 100, 2),
+            "Percent Less Than 0.001": f'{round((count_001 / total_matched) * 100, 2)}%',
             "Count Less Than 0.002": count_002,
-            "Percent Less Than 0.002": round((count_002 / total_matched) * 100, 2),
+            "Percent Less Than 0.002": f'{round((count_002 / total_matched) * 100, 2)}%',
             "Count Less Than 0.003": count_003,
-            "Percent Less Than 0.003": round((count_003 / total_matched) * 100, 2),
+            "Percent Less Than 0.003": f'{round((count_003 / total_matched) * 100, 2)}%',
             "Count Less Than 0.004": count_004,
-            "Percent Less Than 0.004": round((count_004 / total_matched) * 100, 2),
+            "Percent Less Than 0.004": f'{round((count_004 / total_matched) * 100, 2)}%',
             "Count Less Than 0.005": count_005,
-            "Percent Less Than 0.005": round((count_005 / total_matched) * 100, 2),
+            "Percent Less Than 0.005": f'{round((count_005 / total_matched) * 100, 2)}%',
             "Count Less Than 0.010": count_010,
-            "Percent Less Than 0.010": round((count_010 / total_matched) * 100, 2),
+            "Percent Less Than 0.010": f'{round((count_010 / total_matched) * 100, 2)}%',
             "Count Less Than 0.020": count_020,
-            "Percent Less Than 0.020": round((count_020 / total_matched) * 100, 2),
+            "Percent Less Than 0.020": f'{round((count_020 / total_matched) * 100, 2)}%',
             "Count Less Than 0.030": count_030,
-            "Percent Less Than 0.030": round((count_030 / total_matched) * 100, 2),
+            "Percent Less Than 0.030": f'{round((count_030 / total_matched) * 100, 2)}%',
             "Count Less Than 0.040": count_040,
-            "Percent Less Than 0.040": round((count_040 / total_matched) * 100, 2),
+            "Percent Less Than 0.040": f'{round((count_040 / total_matched) * 100, 2)}%',
             "Count Less Than 0.050": count_050,
-            "Percent Less Than 0.050": round((count_050 / total_matched) * 100, 2),
+            "Percent Less Than 0.050": f'{round((count_050 / total_matched) * 100, 2)}%',
             "Count Less Than 0.070": count_070,
-            "Percent Less Than 0.070": round((count_070 / total_matched) * 100, 2),
+            "Percent Less Than 0.070": f'{round((count_070 / total_matched) * 100, 2)}%',
             "Count Less Than 0.090": count_090,
-            "Percent Less Than 0.090": round((count_090 / total_matched) * 100, 2),
+            "Percent Less Than 0.090": f'{round((count_090 / total_matched) * 100, 2)}%',
             "Count Greater Than 1.000": count_gt_1000,
-            "Percent Greater Than 1.000": round((count_gt_1000 / total_matched) * 100, 2),
+            "Percent Greater Than 1.000": f'{round((count_gt_1000 / total_matched) * 100, 2)}%',
             "Count Greater Than 1.500": count_gt_1500,
-            "Percent Greater Than 1.500": round((count_gt_1500 / total_matched) * 100, 2),
-            "10 Largest Differences": ["{:.2f}".format(x) for x in sorted(self.response_times_, reverse=True)[:10]],
+            "Percent Greater Than 1.500": f'{round((count_gt_1500 / total_matched) * 100, 2)}%',
+            "10 Largest Differences": ["{:.3f}".format(x) for x in sorted(self.response_times_, reverse=True)[:10]],
             "Capture Duration": str(duration),
             "Start Time": str(start_time),
             "End time": str(end_time)
@@ -196,7 +196,7 @@ class capture_analyzer:
         plt.ylabel("Response Time (seconds)", fontsize=12)
         plt.grid(True, linestyle='--', alpha=0.6)
         plt.tight_layout()
-        output_file = self.output_dir_ / "summary_report.png"
+        output_file = self.output_dir_ / "response_time_detail.png"
         plt.savefig(output_file, dpi=300)
         plt.close()
         self.logger_.debug(f"Raw response times saved to {output_file}")
@@ -228,7 +228,7 @@ class capture_analyzer:
         bars = plt.bar(df["Category"], df["Percent"], color='skyblue')
         plt.xticks(rotation=45, fontsize=10)
         plt.yticks(fontsize=10)
-        mean_value = self.summary_.get("avg_response_time", None)
+        mean_value = self.summary_.get("Avg Response Time", None)
 
         if mean_value is not None:
             title = f"Response Time Distribution (Mean Response Time = {mean_value:.6f} sec)"
@@ -281,7 +281,7 @@ class capture_analyzer:
         bars = plt.bar(df["Category"], df["Count"], color='skyblue')
         plt.xticks(rotation=45, fontsize=10)
         plt.yticks(fontsize=10)
-        mean_value = self.summary_.get("avg_response_time", None)
+        mean_value = self.summary_.get("Avg Response Time", None)
 
         if mean_value is not None:
             title = f"Response Time Distribution ( Mean Response Time = {mean_value:.6f} sec)"
