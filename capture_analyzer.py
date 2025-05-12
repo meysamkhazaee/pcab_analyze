@@ -2,7 +2,7 @@ import pyshark
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from rich.progress import track
+from rich.progress import Progress
 from statistics import mean
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -38,43 +38,43 @@ class capture_analyzer:
         self.logger_.debug(f"Starting PCAP analysis for packet_type = {packet_type}")
         protocol_counter = Counter()
         timestamps = []
-        packet_count = 0
+        packet_count = sum(1 for _ in self.pcap_)
 
-        for pkt in track(self.pcap_, description="Processing packets"):
-            try:
-                protocol = pkt.highest_layer
-                if protocol != 'SMPP':
-                    continue
-                timestamp = float(pkt.sniff_timestamp)
-                protocol_counter[protocol] += 1
-                timestamps.append(timestamp)
-                packet_count += 1
-                cmd_type = pkt.smpp.command_id.showname_value.lower()
-                seq_num = pkt.smpp.sequence_number
-                timestamp = float(pkt.sniff_timestamp)
+        with Progress() as progress:
+            task = progress.add_task("[green]Processing packets ...", total=packet_count)
 
-                if 'bind_' in cmd_type and 'resp' not in cmd_type:
-                    src_ip = pkt.ip.src
-                    src_port = pkt.tcp.srcport
-                    system_id = pkt.smpp.system_id
-                    target_addr = f"{src_ip}:{src_port}"
-                    self.sessions_[system_id].add(target_addr)
+            for pkt in self.pcap_:
+                try:
+                    protocol = pkt.highest_layer
+                    protocol_counter[protocol] += 1
+                    if protocol != 'SMPP':
+                        progress.update(task, advance=1)
+                        continue
+                    timestamp = float(pkt.sniff_timestamp)
+                    timestamps.append(timestamp)
+                    cmd_type = pkt.smpp.command_id.showname_value.lower()
+                    seq_num = pkt.smpp.sequence_number
 
-                if packet_type in cmd_type and 'resp' not in cmd_type:
-                    src_ip = pkt.ip.src
-                    src_port = pkt.tcp.srcport
-                    target_addr = f"{src_ip}:{src_port}"
-                    self.sessions_[target_addr].add(target_addr)
-                    self.request_[seq_num] = timestamp
+                    if 'bind_' in cmd_type and 'resp' not in cmd_type:
+                        src_ip = pkt.ip.src
+                        src_port = pkt.tcp.srcport
+                        system_id = pkt.smpp.system_id
+                        target_addr = f"{src_ip}:{src_port}"
+                        self.sessions_[system_id].add(target_addr)
 
-                elif f'{packet_type} - resp' in cmd_type:
-                    self.request_resp_[seq_num] = timestamp
+                    if packet_type in cmd_type and 'resp' not in cmd_type:
+                        self.request_[seq_num] = timestamp
 
-            except AttributeError:
-                self.logger_.error("PCAP analysis failed.")
-                self.pcap_.close()
-                exit()
-        
+                    elif f'{packet_type} - resp' in cmd_type:
+                        self.request_resp_[seq_num] = timestamp
+
+                except AttributeError as e:
+                    self.logger_.error(f"PCAP analysis failed: {e}")
+                    self.pcap_.close()
+                    exit()
+
+                progress.update(task, advance=1)
+
         if len(self.request_) == 0:
             self.logger_.error(f"No results found for specified packet_type = {packet_type}.")
             exit()
@@ -89,6 +89,7 @@ class capture_analyzer:
 
         # Match requests with responses
         self.response_times_ = []
+        self.response_time_map_ = {}
         for seq in self.request_:
             if seq in self.request_resp_:
                 if self.request_resp_[seq] < self.request_[seq]:
@@ -96,7 +97,8 @@ class capture_analyzer:
                     self.logger_.error(f"Response time is negative for seq {seq} ")
                     continue
                 delta = self.request_resp_[seq] - self.request_[seq]
-                self.response_times_.append(delta)
+                self.response_times.append(delta)
+                self.response_time_map_[seq] = delta
 
         unmatched = set(self.request_) - set(self.request_resp_)
 
@@ -181,6 +183,8 @@ class capture_analyzer:
 
         self.output_dir_ = Path(self.output_dir_) / f"{packet_type}"
         self.output_dir_.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame(list(self.response_time_map_.items()), columns=["Sequence Number", "Response Time (s)"])
+        df.to_excel(f"{self.output_dir_}/response_times.xlsx", index=False)
         self.logger_.debug("Summary generation completed.")
 
     def plot_raw_response_times(self):
