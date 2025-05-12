@@ -97,7 +97,7 @@ class capture_analyzer:
                     self.logger_.error(f"Response time is negative for seq {seq} ")
                     continue
                 delta = self.request_resp_[seq] - self.request_[seq]
-                self.response_times.append(delta)
+                self.response_times_.append(delta)
                 self.response_time_map_[seq] = delta
 
         unmatched = set(self.request_) - set(self.request_resp_)
