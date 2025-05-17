@@ -7,20 +7,44 @@ from statistics import mean
 import matplotlib.pyplot as plt
 import pandas as pd
 from logger import logger
+import dpkt
 
 __version__ = "1.0.0"
 
 class capture_analyzer:
 
-    def __init__(self, file_path, filter=None):
+    COMMANDS = {
+        "bind_receiver":     "0x00000001",
+        "bind_transmitter":  "0x00000002",
+        "bind_transceiver":  "0x00000009",
+        "submit_sm":         "0x00000004",
+        "submit_sm_resp":    "0x80000004",
+        "deliver_sm":        "0x00000005",
+        "deliver_sm_resp":   "0x80000005",
+    }
+
+    BIND_COMMANDS = {
+        COMMANDS["bind_receiver"],
+        COMMANDS["bind_transmitter"],
+        COMMANDS["bind_transceiver"]
+    }
+
+    def __init__(self, file_path, filter='exported_pdu.prot_name == "smpp"'):
         self.file_path_ = file_path
         self.logger_ = logger(log_level='DEBUG')
         self.logger_.debug(f"Loading PCAP file: {file_path}")
         self.pcap_ = pyshark.FileCapture(file_path, display_filter=filter, keep_packets=False)
 
+        self.packet_counts_  = 0
+        with open(file_path, 'rb') as f:
+            pcap = dpkt.pcap.Reader(f)
+            for _ in pcap:
+                self.packet_counts_  += 1
+
+            
         pcap_name = Path(file_path).stem
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.output_dir_ = Path("output") / f"{pcap_name}_{timestamp}"
+        # timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.output_dir_ = Path("output") / f"{pcap_name}"
         # self.output_dir_.mkdir(parents=True, exist_ok=True)
         
         self.sessions_ = defaultdict(set)
@@ -35,38 +59,54 @@ class capture_analyzer:
         self.pcap_.close()
 
     def analyze_pcab(self, packet_type):
+
         self.logger_.debug(f"Starting PCAP analysis for packet_type = {packet_type}")
+        packet_type = packet_type.lower().strip()
+        if packet_type not in self.COMMANDS:
+            self.logger_.error(f"Unknown SMPP command name: '{packet_type}'")
+            exit()
+        packet_id = self.COMMANDS[packet_type]
+
         protocol_counter = Counter()
         timestamps = []
-        packet_count = sum(1 for _ in self.pcap_)
 
         with Progress() as progress:
-            task = progress.add_task("[green]Processing packets ...", total=packet_count)
+            task = progress.add_task("[green]Processing packets ... \t", total=self.packet_counts_)
+            packet_counter = 0
 
             for pkt in self.pcap_:
                 try:
                     protocol = pkt.highest_layer
                     protocol_counter[protocol] += 1
-                    if protocol != 'SMPP':
-                        progress.update(task, advance=1)
-                        continue
+                    packet_counter += 1
+
+                    smpp = pkt.smpp
+                    cmd_id = smpp.command_id
+
                     timestamp = float(pkt.sniff_timestamp)
                     timestamps.append(timestamp)
-                    cmd_type = pkt.smpp.command_id.showname_value.lower()
-                    seq_num = pkt.smpp.sequence_number
 
-                    if 'bind_' in cmd_type and 'resp' not in cmd_type:
-                        src_ip = pkt.ip.src
-                        src_port = pkt.tcp.srcport
-                        system_id = pkt.smpp.system_id
+                    seq_num = smpp.sequence_number
+                    target_addr = ""
+
+                    if cmd_id == self.COMMANDS[packet_type]:
+                        src_ip = pkt.exported_pdu.ip_src 
+                        src_port = pkt.exported_pdu.src_port
                         target_addr = f"{src_ip}:{src_port}"
-                        self.sessions_[system_id].add(target_addr)
 
-                    if packet_type in cmd_type and 'resp' not in cmd_type:
-                        self.request_[seq_num] = timestamp
-
-                    elif f'{packet_type} - resp' in cmd_type:
-                        self.request_resp_[seq_num] = timestamp
+                    key = (seq_num, target_addr)
+                    
+                    if cmd_id in self.BIND_COMMANDS:
+                        self.sessions_[smpp.system_id].add(target_addr)
+                    else:
+                        self.sessions_[f"src_target = {target_addr}"].add(target_addr)
+                    
+                    if cmd_id == packet_id:  # request
+                        self.request_[key] = timestamp
+                    elif cmd_id == str(hex(0x80000000 | int(packet_id, 16))):  # response
+                        self.request_resp_[key] = timestamp
+                    else:
+                        self.logger_.warning(f"Ignored SMPP command_id: {cmd_id}")
 
                 except AttributeError as e:
                     self.logger_.error(f"PCAP analysis failed: {e}")
@@ -74,12 +114,13 @@ class capture_analyzer:
                     exit()
 
                 progress.update(task, advance=1)
+        print()
 
         if len(self.request_) == 0:
             self.logger_.error(f"No results found for specified packet_type = {packet_type}.")
             exit()
 
-        self.logger_.debug(f"Packet processing complete. Total packets: {packet_count}")
+        self.logger_.debug(f"Packet processing complete. Total packets: {packet_counter}")
         self.logger_.debug(f"Matching requests to responses...")
 
         start_time = datetime.fromtimestamp(min(timestamps))
@@ -90,15 +131,17 @@ class capture_analyzer:
         # Match requests with responses
         self.response_times_ = []
         self.response_time_map_ = {}
-        for seq in self.request_:
-            if seq in self.request_resp_:
-                if self.request_resp_[seq] < self.request_[seq]:
-                    negative_response_time.append(seq)
-                    self.logger_.error(f"Response time is negative for seq {seq} ")
+        for (seq_num, target_addr), timestamp in self.request_.items():
+            key = (seq_num, target_addr)
+            if key in self.request_resp_:
+                if self.request_resp_[key] < self.request_[key]:
+                    target = [self.request_resp_[key], self.request_[key], seq_num, target_addr]
+                    negative_response_time.append(target)
+                    self.logger_.error(f"Response time is negative for : {target} ")
                     continue
-                delta = self.request_resp_[seq] - self.request_[seq]
+                delta = self.request_resp_[key] - self.request_[key]
                 self.response_times_.append(delta)
-                self.response_time_map_[seq] = delta
+                self.response_time_map_[key] = delta
 
         unmatched = set(self.request_) - set(self.request_resp_)
 
@@ -130,14 +173,15 @@ class capture_analyzer:
         count_gt_1500 = sum(d > 1.500 for d in self.response_times_)
 
         self.summary_ = {
-            "Total Packets": packet_count,
+            "Total Packets": packet_counter,
             "Protocols": dict(protocol_counter),
             "Connections": len(self.sessions_),
             "Sessions": {k: len(v) for k, v in self.sessions_.items()},
             "Packet Type": packet_type,
             f"'{packet_type}' Count": len(self.request_),
             f"'{packet_type} - resp' Count": len(self.request_resp_),
-            f"Unmatched '{packet_type}' sequences": list(unmatched),
+            f"Unmatched '{packet_type}' sequences": "\n".join(str(item) for item in unmatched),
+            f"Negative Response '{packet_type}' sequences": "\n".join(str(item) for item in negative_response_time),
             f"Negative Response '{packet_type}' sequences": list(negative_response_time),
             "Matched Request": len(self.response_times_),
             "Min Response Time": min_diff,
@@ -175,7 +219,7 @@ class capture_analyzer:
             "Percent Greater Than 1.000": f'{round((count_gt_1000 / total_matched) * 100, 2)}%',
             "Count Greater Than 1.500": count_gt_1500,
             "Percent Greater Than 1.500": f'{round((count_gt_1500 / total_matched) * 100, 2)}%',
-            "10 Largest Differences": ["{:.3f}".format(x) for x in sorted(self.response_times_, reverse=True)[:10]],
+            "10 Largest Differences": [x for x in sorted(self.response_times_, reverse=True)[:10]],
             "Capture Duration": str(duration),
             "Start Time": str(start_time),
             "End time": str(end_time)
@@ -183,8 +227,10 @@ class capture_analyzer:
 
         self.output_dir_ = Path(self.output_dir_) / f"{packet_type}"
         self.output_dir_.mkdir(parents=True, exist_ok=True)
-        df = pd.DataFrame(list(self.response_time_map_.items()), columns=["Sequence Number", "Response Time (s)"])
-        df.to_excel(f"{self.output_dir_}/response_times.xlsx", index=False)
+        df1 = pd.DataFrame(list(self.response_time_map_.items()), columns=["Sequence Number", "Response Time (s)"])
+        df2 = pd.DataFrame(negative_response_time, columns=["Submit Resp Time","Submit Time", "Sequence Number", "Session"])
+        df1.to_excel(f"{self.output_dir_}/response_times.xlsx", index=False)
+        df2.to_excel(f"{self.output_dir_}/negative_response_time.xlsx", index=False)
         self.logger_.debug("Summary generation completed.")
 
     def plot_raw_response_times(self):
@@ -301,38 +347,41 @@ class capture_analyzer:
         plt.grid(axis='y', linestyle='--', alpha=0.7)
 
         # Save chart
-        output_file = self.output_dir_ / "response_time_distribution_by_count.png"
+        output_file = Path(self.output_dir_) / "response_time_distribution_by_count.png"
         plt.savefig(output_file, dpi=300)
         plt.close()
         self.logger_.debug(f"Distribution plot (count) saved to {output_file}")
 
-    def generate_summary_image(self, title: str = "PCAP Analysis Summary"):
-        output_file = self.output_dir_ / "summary.png"
-        lines = []
+    def generate_summary_text(self, title: str = "PCAP Analysis Summary"):
+        output_file = self.output_dir_ / "summary.txt"
+        self.output_dir_.mkdir(parents=True, exist_ok=True)
+
+        lines = [f"{title}", ""]  # Add title and blank line
+
         for k, v in self.summary_.items():
             if isinstance(v, dict):
                 lines.append(f"{k}:")
                 for subk, subv in v.items():
-                    lines.append(f"    {subk}: {subv}")
-            elif isinstance(v, list):
-                lines.append(f"{k}: [{', '.join(str(i) for i in v)}]")
+                    if isinstance(subv, (list, set)):
+                        lines.append(f"\t{subk}:")
+                        for item in subv:
+                            lines.append(f"\t\t{item}")
+                    else:
+                        lines.append(f"\t{subk}: {subv}")
+            elif isinstance(v, (list, set)):
+                lines.append(f"{k}:")
+                for item in v:
+                    lines.append(f"\t{item}")
             else:
                 lines.append(f"{k}: {v}")
 
-        # Add padding for title
-        lines.insert(0, "")  # Spacer after title
+        # Join lines into text
+        text_output = "\n".join(lines)
 
-        # Create the image
-        fig, ax = plt.subplots(figsize=(16, len(lines) * 0.3 + 1))
-        ax.axis('off')
+        # Save to file
+        with open(output_file, "w") as f:
+            f.write(text_output)
 
-        # Draw title
-        ax.text(0, 1.02, title, fontsize=24, fontweight='bold', ha='left', va='top')
+        self.logger_.debug(f"Summary text saved to {output_file}")
+        print(text_output)  # Optional: print to console
 
-        # Draw lines
-        for i, line in enumerate(lines):
-            ax.text(0, 1 - i * 0.04, line, fontsize=24, va='top', ha='left', family='monospace')
-
-        plt.savefig(output_file, dpi=300, bbox_inches='tight')
-        plt.close()
-        self.logger_.debug(f"Summary image saved to {output_file}")

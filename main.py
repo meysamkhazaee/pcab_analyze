@@ -29,7 +29,7 @@ def main():
 
     try:
         analyzer.analyze_pcab(packet_type=args.packet_type)
-        analyzer.generate_summary_image()
+        analyzer.generate_summary_text()
         analyzer.plot_response_distribution_by_count()
         analyzer.plot_response_distribution_by_percentage()
         analyzer.plot_raw_response_times()
