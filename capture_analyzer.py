@@ -9,24 +9,15 @@ import pandas as pd
 from logger import logger
 import dpkt
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 class capture_analyzer:
 
     COMMANDS = {
-        "bind_receiver":     "0x00000001",
-        "bind_transmitter":  "0x00000002",
-        "bind_transceiver":  "0x00000009",
         "submit_sm":         "0x00000004",
         "submit_sm_resp":    "0x80000004",
         "deliver_sm":        "0x00000005",
         "deliver_sm_resp":   "0x80000005",
-    }
-
-    BIND_COMMANDS = {
-        COMMANDS["bind_receiver"],
-        COMMANDS["bind_transmitter"],
-        COMMANDS["bind_transceiver"]
     }
 
     def __init__(self, file_path, filter='exported_pdu.prot_name == "smpp"'):
@@ -86,27 +77,44 @@ class capture_analyzer:
                     timestamp = float(pkt.sniff_timestamp)
                     timestamps.append(timestamp)
 
-                    seq_num = smpp.sequence_number
-                    target_addr = ""
+                    req_seq = smpp.sequence_number
+                    src_addr = ""
+                    dst_addr = ""
+                    src_addr_resp = ""
+                    dst_addr_resp = ""
 
-                    if cmd_id == self.COMMANDS[packet_type]:
+
+                    visited = False
+                    if cmd_id == packet_id: # request
                         src_ip = pkt.exported_pdu.ip_src 
                         src_port = pkt.exported_pdu.src_port
-                        target_addr = f"{src_ip}:{src_port}"
+                        src_addr = f"{src_ip}:{src_port}"
+                        dst_ip = pkt.exported_pdu.ip_dst
+                        dst_port = pkt.exported_pdu.dst_port
+                        dst_addr= f"{dst_ip}:{dst_port}"
 
-                    key = (seq_num, target_addr)
-                    
-                    if cmd_id in self.BIND_COMMANDS:
-                        self.sessions_[smpp.system_id].add(target_addr)
-                    else:
-                        self.sessions_[f"src_target = {target_addr}"].add(target_addr)
-                    
-                    if cmd_id == packet_id:  # request
+                        self.sessions_[src_addr].add(None)
+
+                        key = (req_seq, src_addr, dst_addr)
                         self.request_[key] = timestamp
-                    elif cmd_id == str(hex(0x80000000 | int(packet_id, 16))):  # response
+                        visited = True
+
+                    elif cmd_id == str(hex(0x80000000 | int(packet_id, 16))): # response
+                        src_ip_resp = pkt.exported_pdu.ip_src 
+                        src_port_resp = pkt.exported_pdu.src_port
+                        src_addr_resp= f"{src_ip_resp}:{src_port_resp}"
+                        dst_ip_resp = pkt.exported_pdu.ip_dst
+                        dst_port_resp = pkt.exported_pdu.dst_port
+                        dst_addr_resp= f"{dst_ip_resp}:{dst_port_resp}"
+
+                        key = (req_seq, src_addr_resp, dst_addr_resp)
                         self.request_resp_[key] = timestamp
-                    else:
-                        self.logger_.warning(f"Ignored SMPP command_id: {cmd_id}")
+                        visited = True
+                        
+                    elif not visited:
+                        # self.logger_.warning(f"Ignored SMPP command_id: {cmd_id}")
+                        progress.update(task, advance=1)
+                        continue
 
                 except AttributeError as e:
                     self.logger_.error(f"PCAP analysis failed: {e}")
@@ -126,27 +134,31 @@ class capture_analyzer:
         start_time = datetime.fromtimestamp(min(timestamps))
         end_time = datetime.fromtimestamp(max(timestamps))
         duration = end_time - start_time
-        negative_response_time = []
+        negative_response_time_list = []
 
         # Match requests with responses
         self.response_times_ = []
-        self.response_time_map_ = {}
-        for (seq_num, target_addr), timestamp in self.request_.items():
-            key = (seq_num, target_addr)
-            if key in self.request_resp_:
-                if self.request_resp_[key] < self.request_[key]:
-                    target = [self.request_resp_[key], self.request_[key], seq_num, target_addr]
-                    negative_response_time.append(target)
-                    self.logger_.error(f"Response time is negative for : {target} ")
+        response_time_map = {}
+        for (req_seq, src_addr, dst_addr), timestamp in self.request_.items():
+            req_key = (req_seq, src_addr, dst_addr)
+            resp_key = (req_seq, dst_addr, src_addr)
+            if resp_key in self.request_resp_:
+                if self.request_resp_[resp_key] < self.request_[req_key]:
+                    negative_response_time_list.append(req_key)
+                    self.logger_.error(f"Response time is negative for : {req_key} ")
                     continue
-                delta = self.request_resp_[key] - self.request_[key]
+                delta = self.request_resp_[resp_key] - self.request_[req_key]
                 self.response_times_.append(delta)
-                self.response_time_map_[key] = delta
+                response_time_map[req_key] = delta
 
-        unmatched = set(self.request_) - set(self.request_resp_)
+        not_responded = {
+            (req_seq, src_addr, dst_addr)
+            for (req_seq, src_addr, dst_addr) in self.request_
+            if (req_seq, dst_addr, src_addr) not in self.request_resp_
+        }
 
-        self.logger_.debug(f"Matched {len(self.response_times_)} request/response pairs.")
-        self.logger_.debug(f"Unmatched sequences: {len(unmatched)}")
+        self.logger_.debug(f"Responded {len(self.response_times_)} request.")
+        self.logger_.debug(f"Not Responded Request: {len(not_responded)}")
 
         min_diff = min(self.response_times_) if self.response_times_ else None
         max_diff = max(self.response_times_) if self.response_times_ else None
@@ -180,9 +192,8 @@ class capture_analyzer:
             "Packet Type": packet_type,
             f"'{packet_type}' Count": len(self.request_),
             f"'{packet_type} - resp' Count": len(self.request_resp_),
-            f"Unmatched '{packet_type}' sequences": "\n".join(str(item) for item in unmatched),
-            f"Negative Response '{packet_type}' sequences": "\n".join(str(item) for item in negative_response_time),
-            f"Negative Response '{packet_type}' sequences": list(negative_response_time),
+            f"Unmatched '{packet_type}' sequences": "\n".join(str(item) for item in not_responded),
+            f"Negative Response '{packet_type}' sequences": "\n".join(str(item) for item in negative_response_time_list),
             "Matched Request": len(self.response_times_),
             "Min Response Time": min_diff,
             "Max Response Time": max_diff,
@@ -227,8 +238,11 @@ class capture_analyzer:
 
         self.output_dir_ = Path(self.output_dir_) / f"{packet_type}"
         self.output_dir_.mkdir(parents=True, exist_ok=True)
-        df1 = pd.DataFrame(list(self.response_time_map_.items()), columns=["Sequence Number", "Response Time (s)"])
-        df2 = pd.DataFrame(negative_response_time, columns=["Submit Resp Time","Submit Time", "Sequence Number", "Session"])
+        df1 = pd.DataFrame(
+            [(k[0], k[1], k[2], v) for k, v in response_time_map.items()],
+            columns=["Submit Sequence Number", "Source", "Destination", "Response Time (s)"]
+        )
+        df2 = pd.DataFrame(negative_response_time_list, columns=["Submit Sequence Number","Source", "Destination"])
         df1.to_excel(f"{self.output_dir_}/response_times.xlsx", index=False)
         df2.to_excel(f"{self.output_dir_}/negative_response_time.xlsx", index=False)
         self.logger_.debug("Summary generation completed.")
