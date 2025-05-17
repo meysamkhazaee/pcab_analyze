@@ -83,7 +83,6 @@ class capture_analyzer:
                     src_addr_resp = ""
                     dst_addr_resp = ""
 
-
                     visited = False
                     if cmd_id == packet_id: # request
                         src_ip = pkt.exported_pdu.ip_src 
@@ -192,44 +191,44 @@ class capture_analyzer:
             "Packet Type": packet_type,
             f"'{packet_type}' Count": len(self.request_),
             f"'{packet_type} - resp' Count": len(self.request_resp_),
-            f"Unmatched '{packet_type}' sequences": "\n".join(str(item) for item in not_responded),
-            f"Negative Response '{packet_type}' sequences": "\n".join(str(item) for item in negative_response_time_list),
-            "Matched Request": len(self.response_times_),
+            f"Not Response '{packet_type}'": "\n".join(str(item) for item in not_responded),
+            f"Negative Response '{packet_type}'": "\n".join(str(item) for item in negative_response_time_list),
+            "Responded Request": len(self.response_times_),
             "Min Response Time": min_diff,
             "Max Response Time": max_diff,
             "Avg Response Time": mean_diff,
-            "Count Greater Than Mean Time Difference": count_gt_mean,
-            "Percent Greater Than Mean Time Difference": f'{round((count_gt_mean / total_matched) * 100, 2)}%',
-            "Count Smaller Than Mean Time Difference": count_lt_mean,
-            "Percent Smaller Than Mean Time Difference": f'{round((count_lt_mean / total_matched) * 100, 2)}%',
             "Count Less Than 0.001": count_001,
-            "Percent Less Than 0.001": f'{round((count_001 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.001": round((count_001 / total_matched) * 100, 2),
             "Count Less Than 0.002": count_002,
-            "Percent Less Than 0.002": f'{round((count_002 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.002": round((count_002 / total_matched) * 100, 2),
             "Count Less Than 0.003": count_003,
-            "Percent Less Than 0.003": f'{round((count_003 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.003": round((count_003 / total_matched) * 100, 2),
             "Count Less Than 0.004": count_004,
-            "Percent Less Than 0.004": f'{round((count_004 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.004": round((count_004 / total_matched) * 100, 2),
             "Count Less Than 0.005": count_005,
-            "Percent Less Than 0.005": f'{round((count_005 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.005": round((count_005 / total_matched) * 100, 2),
             "Count Less Than 0.010": count_010,
-            "Percent Less Than 0.010": f'{round((count_010 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.010": round((count_010 / total_matched) * 100, 2),
             "Count Less Than 0.020": count_020,
-            "Percent Less Than 0.020": f'{round((count_020 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.020": round((count_020 / total_matched) * 100, 2),
             "Count Less Than 0.030": count_030,
-            "Percent Less Than 0.030": f'{round((count_030 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.030": round((count_030 / total_matched) * 100, 2),
             "Count Less Than 0.040": count_040,
-            "Percent Less Than 0.040": f'{round((count_040 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.040": round((count_040 / total_matched) * 100, 2),
             "Count Less Than 0.050": count_050,
-            "Percent Less Than 0.050": f'{round((count_050 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.050": round((count_050 / total_matched) * 100, 2),
             "Count Less Than 0.070": count_070,
-            "Percent Less Than 0.070": f'{round((count_070 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.070": round((count_070 / total_matched) * 100, 2),
             "Count Less Than 0.090": count_090,
-            "Percent Less Than 0.090": f'{round((count_090 / total_matched) * 100, 2)}%',
+            "Percent Less Than 0.090": round((count_090 / total_matched) * 100, 2),
             "Count Greater Than 1.000": count_gt_1000,
-            "Percent Greater Than 1.000": f'{round((count_gt_1000 / total_matched) * 100, 2)}%',
+            "Percent Greater Than 1.000": round((count_gt_1000 / total_matched) * 100, 2),
             "Count Greater Than 1.500": count_gt_1500,
-            "Percent Greater Than 1.500": f'{round((count_gt_1500 / total_matched) * 100, 2)}%',
+            "Percent Greater Than 1.500": round((count_gt_1500 / total_matched) * 100, 2),
+            "Count Greater Than Mean Time Difference": count_gt_mean,
+            "Percent Greater Than Mean Time Difference": round((count_gt_mean / total_matched) * 100, 2),
+            "Count Smaller Than Mean Time Difference": count_lt_mean,
+            "Percent Smaller Than Mean Time Difference": round((count_lt_mean / total_matched) * 100, 2),
             "10 Largest Differences": [x for x in sorted(self.response_times_, reverse=True)[:10]],
             "Capture Duration": str(duration),
             "Start Time": str(start_time),
@@ -252,7 +251,7 @@ class capture_analyzer:
         plt.figure(figsize=(14, 5))
         plt.plot(self.response_times_, color='mediumblue', linewidth=1)
         plt.title("Recorded SMPP Response Times", fontsize=14, fontweight='bold')
-        plt.xlabel("Matched Submit_sm Packet Index", fontsize=12)
+        plt.xlabel("Packet Index", fontsize=12)
         plt.ylabel("Response Time (seconds)", fontsize=12)
         plt.grid(True, linestyle='--', alpha=0.6)
         plt.tight_layout()
@@ -261,11 +260,10 @@ class capture_analyzer:
         plt.close()
         self.logger_.debug(f"Raw response times saved to {output_file}")
 
-    def plot_response_distribution_by_count(self):
+    def plot_response_distribution_by_percentage(self):
         self.logger_.debug("Generating response distribution by percentage.")
+        mean_value = self.summary_.get("Avg Response Time", 0)
         stats_to_plot = {
-            "Greater Than Mean": self.summary_["Percent Greater Than Mean Time Difference"],
-            "Smaller Than Mean": self.summary_["Percent Smaller Than Mean Time Difference"],
             "< 0.001": self.summary_["Percent Less Than 0.001"],
             "< 0.002": self.summary_["Percent Less Than 0.002"],
             "< 0.003": self.summary_["Percent Less Than 0.003"],
@@ -279,7 +277,9 @@ class capture_analyzer:
             "< 0.070": self.summary_["Percent Less Than 0.070"],
             "< 0.090": self.summary_["Percent Less Than 0.090"],
             "> 1.000": self.summary_["Percent Greater Than 1.000"],
-            "> 1.500": self.summary_["Percent Greater Than 1.500"]
+            "> 1.500": self.summary_["Percent Greater Than 1.500"],
+            f"> Mean = {mean_value:.3f}": self.summary_["Percent Greater Than Mean Time Difference"],
+            f"< Mean = {mean_value:.3f}": self.summary_["Percent Smaller Than Mean Time Difference"]
         }
 
         df = pd.DataFrame(list(stats_to_plot.items()), columns=["Category", "Percent"])
@@ -288,15 +288,11 @@ class capture_analyzer:
         bars = plt.bar(df["Category"], df["Percent"], color='skyblue')
         plt.xticks(rotation=45, fontsize=10)
         plt.yticks(fontsize=10)
-        mean_value = self.summary_.get("Avg Response Time", None)
-
-        if mean_value is not None:
-            title = f"Response Time Distribution (Mean Response Time = {mean_value:.6f} sec)"
-        else:
-            title = "Response Time Distribution (Mean Response Time = N/A)"
+        
+        title = "Response Time Distribution By Percentage"
 
         plt.title(title, fontsize=14, fontweight='bold')
-        plt.xlabel("Time Categories", fontsize=12)
+        plt.xlabel("Categories", fontsize=12)
         plt.ylabel("Percent", fontsize=12)
 
         # Annotate bars
@@ -314,11 +310,10 @@ class capture_analyzer:
         plt.close()
         self.logger_.debug(f"Distribution plot (percentage) saved to {output_file}")
 
-    def plot_response_distribution_by_percentage(self):
+    def plot_response_distribution_by_count(self):
         self.logger_.debug("Generating response distribution by count.")
+        mean_value = self.summary_.get("Avg Response Time", None)
         stats_to_plot = {
-            "Greater Than Mean": self.summary_["Count Greater Than Mean Time Difference"],
-            "Smaller Than Mean": self.summary_["Count Smaller Than Mean Time Difference"],
             "< 0.001": self.summary_["Count Less Than 0.001"],
             "< 0.002": self.summary_["Count Less Than 0.002"],
             "< 0.003": self.summary_["Count Less Than 0.003"],
@@ -332,7 +327,9 @@ class capture_analyzer:
             "< 0.070": self.summary_["Count Less Than 0.070"],
             "< 0.090": self.summary_["Count Less Than 0.090"],
             "> 1.000": self.summary_["Count Greater Than 1.000"],
-            "> 1.500": self.summary_["Count Greater Than 1.500"]
+            "> 1.500": self.summary_["Count Greater Than 1.500"],
+            f"> Mean = {mean_value:.3f}": self.summary_["Count Greater Than Mean Time Difference"],
+            f"< Mean = {mean_value:.3f}": self.summary_["Count Smaller Than Mean Time Difference"],
         }
 
         df = pd.DataFrame(list(stats_to_plot.items()), columns=["Category", "Count"])
@@ -342,13 +339,9 @@ class capture_analyzer:
         plt.xticks(rotation=45, fontsize=10)
         plt.yticks(fontsize=10)
         mean_value = self.summary_.get("Avg Response Time", None)
-
-        if mean_value is not None:
-            title = f"Response Time Distribution ( Mean Response Time = {mean_value:.6f} sec)"
-        else:
-            title = "Response Time Distribution (Mean Response Time = N/A)"
+        title = f"Response Time Distribution By Count"
         plt.title(title, fontsize=14, fontweight='bold')
-        plt.xlabel("Time Categories", fontsize=12)
+        plt.xlabel("Categories", fontsize=12)
         plt.ylabel("Count", fontsize=12)
 
         # Annotate bars
