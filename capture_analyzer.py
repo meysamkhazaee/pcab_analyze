@@ -242,8 +242,10 @@ class capture_analyzer:
             columns=["Submit Sequence Number", "Source", "Destination", "Response Time (s)"]
         )
         df2 = pd.DataFrame(negative_response_time_list, columns=["Submit Sequence Number","Source", "Destination"])
-        df1.to_excel(f"{self.output_dir_}/response_times.xlsx", index=False)
-        df2.to_excel(f"{self.output_dir_}/negative_response_time.xlsx", index=False)
+        # df1.to_excel(f"{self.output_dir_}/response_times.xlsx", index=False)
+        df1.to_csv(f"{self.output_dir_}/response_times.csv", index=False)
+        # df2.to_excel(f"{self.output_dir_}/negative_response_time.xlsx", index=False)
+        df2.to_csv(f"{self.output_dir_}/negative_response_time.csv", index=False)
         self.logger_.debug("Summary generation completed.")
 
     def plot_raw_response_times(self):
